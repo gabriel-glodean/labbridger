@@ -1,0 +1,32 @@
+[Unit]
+Description=labbridger (network scanner / relay / actix-web)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=server
+WorkingDirectory=/home/server
+ExecStart=/home/server/labbridger
+Restart=on-failure
+RestartSec=5s
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+# Send stdout/stderr to the systemd journal (in-memory by default for user
+# sessions).  Nothing is written to a file on disk.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=labbridger
+
+# ── Capabilities (required for raw ICMP sockets / surge-ping) ────────────────
+AmbientCapabilities=CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_RAW
+
+# ── Hardening (optional but recommended) ─────────────────────────────────────
+PrivateTmp=true
+# NoNewPrivileges must stay off so AmbientCapabilities can be inherited
+NoNewPrivileges=false
+
+[Install]
+WantedBy=multi-user.target
+

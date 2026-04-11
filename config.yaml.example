@@ -1,0 +1,36 @@
+server:
+  host: "0.0.0.0"
+  port: 8080
+  # How long (seconds) a session token remains valid after POST /login.
+  # Omit to use the default of 3600 (1 hour).
+  token_ttl_seconds: 3600
+  # TLS is handled by Cloudflare Tunnel – no cert/key needed here.
+
+scanner:
+  network_base: "192.168.1"   # scans .2 – .254
+  delay_seconds: 30
+
+# Users allowed to log in via POST /login.
+# Generate a bcrypt hash with:  cargo run --bin hash-password -- yourpassword
+# Leave the list empty (or remove the key) to disable authentication entirely.
+users:
+  - username: "alice"
+    password_hash: "$2b$12$REPLACE_WITH_OUTPUT_OF_hash-password"
+
+# Shelly smart plugs + the device each plug powers.
+# plug_ip    – local IP of the Shelly device (give it a static DHCP lease)
+# target_mac – MAC address of the device the plug powers (used by /wake)
+plugs:
+  my-pc:
+    plug_ip: "192.168.1.45"
+    target_mac: "aa:bb:cc:dd:ee:ff"
+
+# Relay targets: each key becomes a URL segment under /relay/<name>/...
+relay:
+  targets:
+    # MAC-based (IP resolved dynamically from the network scanner):
+    ollama:
+      mac: "aa:bb:cc:dd:ee:ff"
+      port: 11434
+    # Static URL alternative:
+    # other: "http://192.168.1.50:8000"

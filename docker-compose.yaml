@@ -1,0 +1,7 @@
+services:
+  mock-ollama:
+    build: ./mock-ollama
+    ports:
+      - "11434:11434"      # exposes mock on host:11434 so the relay can reach it
+    restart: unless-stopped
+

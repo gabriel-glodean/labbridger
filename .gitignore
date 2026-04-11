@@ -1,0 +1,7 @@
+/target
+
+# Real config contains credentials — commit config.yaml.example instead
+config.yaml
+
+# JetBrains IDE
+.idea/
