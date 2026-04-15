@@ -1,3 +1,5 @@
+# Windows target:
+# Linux target (default):
 # labbridger
 
 A lightweight Actix-Web server for home-lab use that combines several features in one binary:
@@ -79,6 +81,7 @@ relay:
       port: 22
       probe_method: "ping"
       shelly_power_mac: "11:22:33:44:55:66"
+      shutdown_plug_off: true                 # turn off plug after SSH shutdown
       shutdown_ssh:
         username: "root"
         # os: linux                       # target OS: linux (default) or windows
@@ -101,6 +104,15 @@ relay:
       port: 8080
       shelly_power_mac: "11:22:33:44:55:66"
       shutdown_api_path: "/api/shutdown"  # POST to this path to shut down
+      shutdown_plug_off: true             # turn off plug after API shutdown
+
+    # Brute Shelly stop (just cut power, no graceful shutdown):
+    dumb_device:
+      mac: "cc:dd:ee:ff:11:22"
+      port: 22
+      probe_method: "ping"
+      shelly_power_mac: "11:22:33:44:55:66"
+      shutdown_plug_off: true             # sole stop method — just turn off plug
 
     # Static URL (always on, can't be remotely started/stopped):
     static_service: "http://192.168.1.50:8000"
@@ -288,13 +300,12 @@ shutdown_ssh:
   os: linux                          # default
   port: 22                           # default: 22
   key_file: "/root/.ssh/id_ed25519"  # omit to use system default
-  command: "sudo poweroff"           # auto-detected from os if omitted
 
 # Windows target – password-based auth:
 shutdown_ssh:
   username: "Administrator"
-  password: "s3cret"                 # requires sshpass on the server
   os: windows
+  password: "s3cret"                 # requires sshpass on the server
   # command: "shutdown /s /t 0"      # auto-detected from os if omitted
 ```
 
@@ -306,13 +317,49 @@ Sends an HTTP POST to a path on the device (e.g. an application-level shutdown e
 shutdown_api_path: "/api/shutdown"
 ```
 
+### Shelly plug power-off (`shutdown_plug_off`)
+
+Turns off the Shelly smart plug that powers the device (set via `shelly_power_mac`). This can be used:
+
+- **As the sole stop method** ("brute-force" power cut — no graceful shutdown)
+- **After an SSH or REST API shutdown** (to fully de-power the device once it's offline)
+
+Set `shutdown_plug_off: true` to enable. Defaults to `false` so that existing configs that only use `shelly_power_mac` for *starting* are not affected.
+
+```yaml
+# Brute Shelly stop (just cut power):
+dumb_device:
+  mac: "cc:dd:ee:ff:11:22"
+  port: 22
+  shelly_power_mac: "11:22:33:44:55:66"
+  shutdown_plug_off: true
+
+# SSH shutdown followed by plug off:
+tv_box:
+  mac: "cc:dd:ee:ff:11:22"
+  port: 22
+  shelly_power_mac: "11:22:33:44:55:66"
+  shutdown_plug_off: true
+  shutdown_ssh:
+    username: "root"
+
+# SSH shutdown without plug off (plug only used for /start):
+server:
+  mac: "cc:dd:ee:ff:11:22"
+  port: 22
+  shelly_power_mac: "11:22:33:44:55:66"
+  # shutdown_plug_off: false          # default
+  shutdown_ssh:
+    username: "root"
+```
+
 ### Composite stop sequence
 
 When a target has multiple stop methods configured, the server runs them as a **composite sequence**:
 
 1. **Graceful shutdown** — send SSH command *or* REST API request (SSH takes precedence if both are set)
-2. **Wait for offline** — poll the ARP table until the device's MAC disappears (up to 5 minutes, checked every 10 s)
-3. **Shelly plug off** — turn off the smart plug so the device is fully powered down
+2. **Wait for offline** — poll the ARP table until the device's MAC disappears (up to 5 minutes, checked every 10 s) — only when `shutdown_plug_off` is `true`
+3. **Shelly plug off** — turn off the smart plug so the device is fully powered down — only when `shutdown_plug_off` is `true`
 
 Errors in any step are logged but do **not** abort the remaining steps.
 
@@ -325,6 +372,7 @@ relay:
       port: 22
       probe_method: "ping"
       shelly_power_mac: "11:22:33:44:55:66"
+      shutdown_plug_off: true
       shutdown_ssh:
         username: "root"
 ```

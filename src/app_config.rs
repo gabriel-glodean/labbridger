@@ -135,6 +135,8 @@ pub struct SshShutdownConfig {
 ///   static + probe:    `other: { url: "http://192.168.1.50:8000", probe_path: "/health" }`
 ///   by MAC:            `ollama: { mac: "aa:bb:cc:dd:ee:ff", port: 11434, probe_path: "/api/tags" }`
 ///   with Shelly:       `ollama: { mac: "aa:bb:cc:dd:ee:ff", port: 11434, shelly_power_mac: "11:22:33:44:55:66" }`
+///   brute Shelly stop: `dev: { mac: "aa:bb:cc:dd:ee:ff", port: 22, shelly_power_mac: "11:22:33:44:55:66", shutdown_plug_off: true }`
+///   SSH + plug off:    `dev: { mac: "…", port: 22, shelly_power_mac: "…", shutdown_ssh: {…}, shutdown_plug_off: true }`
 ///   ping-based:        `device: { mac: "aa:bb:cc:dd:ee:ff", port: 22, probe_method: "ping" }`
 #[derive(Debug, Deserialize, Clone)]
 #[serde(untagged)]
@@ -171,6 +173,18 @@ pub enum RelayTarget {
         /// POST /stop/{target} sends a POST request to this path on the device.
         #[serde(default)]
         shutdown_api_path: Option<String>,
+        /// Whether to turn off the Shelly plug as the final step of the stop
+        /// sequence.  Requires `shelly_power_mac` to be set.
+        ///
+        /// When `true` the composite stop sequence ends by powering off the
+        /// smart plug (after an optional graceful shutdown + wait-for-offline).
+        /// This also enables "brute-force" Shelly stop when no SSH or API
+        /// shutdown is configured — the plug is simply switched off.
+        ///
+        /// Defaults to `false` so that existing configs that only set
+        /// `shelly_power_mac` for *starting* are not affected.
+        #[serde(default)]
+        shutdown_plug_off: bool,
     },
     /// Static URL with an explicit probe path.
     StaticManaged {

@@ -168,101 +168,82 @@ impl Stoppable for RestApiStoppable {
     }
 }
 
-// ── CompositeStoppable ───────────────────────────────────────────────────────
+// ── Stop strategy ────────────────────────────────────────────────────────────
 
-/// Composed stoppable that orchestrates a full graceful-shutdown sequence:
+/// The graceful-shutdown method to attempt *before* an optional Shelly plug
+/// power-off.  Determined by pattern-matching the target configuration.
+enum GracefulMethod {
+    /// Send an SSH command to shut down the device.
+    Ssh(SshShutdownConfig),
+    /// POST to a REST API shutdown endpoint on the device.
+    RestApi(String),
+    /// No graceful shutdown — go straight to Shelly plug off (brute force).
+    None,
+}
+
+// ── run_stop_sequence ────────────────────────────────────────────────────────
+
+/// Executes the stop sequence for a MAC-based target.
 ///
-///   1. **Graceful shutdown** — send an SSH *or* REST command to the device
-///      (SSH takes precedence when both are configured).
-///   2. **Wait for offline** — poll the network scanner until the device's MAC
-///      disappears (up to 5 minutes, checked every 10 s).
-///   3. **Shelly plug off** — turn off the smart plug so the device is fully
-///      powered down.
+///   1. Resolve the device IP from the network scanner.
+///   2. Attempt the graceful shutdown method (SSH *or* REST API), if any.
+///   3. If `plug_off_mac` is `Some`, wait for the device to go offline (up to
+///      5 min) then turn off the Shelly plug.
 ///
-/// All three steps are optional — only the parts that have configuration will
-/// run.  Errors in any step are logged but do **not** abort the remaining steps.
-pub struct CompositeStoppable {
-    /// Human-readable target name (for log messages).
+/// Errors in any step are logged but do **not** abort the remaining steps.
+async fn run_stop_sequence(
     target_name: String,
-    /// MAC address of the device to stop.
     target_mac: String,
-    /// Service port of the target (used to build the REST shutdown URL).
     target_port: u16,
-    /// MAC of the Shelly plug that powers the device (if any).
-    shelly_mac: Option<String>,
-    /// SSH shutdown configuration (if any).
-    shutdown_ssh: Option<SshShutdownConfig>,
-    /// REST API shutdown path on the device (if any).
-    shutdown_api_path: Option<String>,
-    /// Network scanner used to resolve MACs → IPs and detect offline state.
+    graceful: GracefulMethod,
+    plug_off_mac: Option<String>,
     scanner: NetworkScanner,
-    /// HTTP client shared with the rest of the application.
     client: reqwest::Client,
-}
+) {
+    eprintln!("[stop] Starting stop sequence for '{}'", target_name);
 
-impl CompositeStoppable {
-    pub fn new(
-        target_name: String,
-        target_mac: String,
-        target_port: u16,
-        shelly_mac: Option<String>,
-        shutdown_ssh: Option<SshShutdownConfig>,
-        shutdown_api_path: Option<String>,
-        scanner: NetworkScanner,
-        client: reqwest::Client,
-    ) -> Self {
-        Self {
-            target_name,
-            target_mac,
-            target_port,
-            shelly_mac,
-            shutdown_ssh,
-            shutdown_api_path,
-            scanner,
-            client,
-        }
-    }
-}
+    let device_ip = scanner.get_ip_by_mac(&target_mac).map(|ip| ip.to_string());
 
-impl Stoppable for CompositeStoppable {
-    async fn stop(&self) -> Result<(), String> {
-        eprintln!("[CompositeStoppable] Starting stop sequence for '{}'", self.target_name);
-
-        // ── Step 1: graceful shutdown (SSH takes precedence over REST) ────
-        let device_ip = self.scanner.get_ip_by_mac(&self.target_mac).map(|ip| ip.to_string());
-
-        if let Some(ref ip) = device_ip {
-            if let Some(ref ssh_config) = self.shutdown_ssh {
-                let ssh = SshStoppable::from_config(ip.clone(), ssh_config);
-                if let Err(e) = ssh.stop().await {
-                    eprintln!("[CompositeStoppable] SSH shutdown failed for '{}': {}", self.target_name, e);
-                }
-            } else if let Some(ref api_path) = self.shutdown_api_path {
-                let rest = RestApiStoppable::new(ip, self.target_port, api_path, self.client.clone());
-                if let Err(e) = rest.stop().await {
-                    eprintln!("[CompositeStoppable] REST shutdown failed for '{}': {}", self.target_name, e);
-                }
+    // ── Step 1: graceful shutdown ────────────────────────────────────────
+    match (&graceful, &device_ip) {
+        (GracefulMethod::Ssh(ssh_config), Some(ip)) => {
+            let ssh = SshStoppable::from_config(ip.clone(), ssh_config);
+            if let Err(e) = ssh.stop().await {
+                eprintln!("[stop] SSH shutdown failed for '{}': {}", target_name, e);
             }
-        } else {
+        }
+        (GracefulMethod::RestApi(api_path), Some(ip)) => {
+            let rest = RestApiStoppable::new(ip, target_port, api_path, client.clone());
+            if let Err(e) = rest.stop().await {
+                eprintln!("[stop] REST shutdown failed for '{}': {}", target_name, e);
+            }
+        }
+        (GracefulMethod::None, _) => {
+            eprintln!("[stop] No graceful shutdown for '{}' — skipping to plug off", target_name);
+        }
+        (_, None) => {
             eprintln!(
-                "[CompositeStoppable] Device '{}' (MAC {}) not on network — skipping graceful shutdown",
-                self.target_name, self.target_mac
+                "[stop] Device '{}' (MAC {}) not on network — skipping graceful shutdown",
+                target_name, target_mac
             );
         }
+    }
 
-        // ── Step 2: wait for the device to go offline ────────────────────
-        if self.shelly_mac.is_some() && device_ip.is_some() {
+    // ── Step 2 & 3: wait for offline + Shelly plug off ──────────────────
+    if let Some(ref plug_mac) = plug_off_mac {
+        // Only wait for the device to go offline when a graceful shutdown was
+        // actually attempted (i.e. not brute-force) and the device was online.
+        if !matches!(graceful, GracefulMethod::None) && device_ip.is_some() {
             let deadline = tokio::time::Instant::now() + Duration::from_secs(300);
-
             loop {
-                if self.scanner.get_ip_by_mac(&self.target_mac).is_none() {
-                    eprintln!("[CompositeStoppable] Device '{}' is now offline", self.target_name);
+                if scanner.get_ip_by_mac(&target_mac).is_none() {
+                    eprintln!("[stop] Device '{}' is now offline", target_name);
                     break;
                 }
                 if tokio::time::Instant::now() >= deadline {
                     eprintln!(
-                        "[CompositeStoppable] Timeout waiting for '{}' to go offline — turning off plug anyway",
-                        self.target_name
+                        "[stop] Timeout waiting for '{}' to go offline — turning off plug anyway",
+                        target_name
                     );
                     break;
                 }
@@ -270,17 +251,13 @@ impl Stoppable for CompositeStoppable {
             }
         }
 
-        // ── Step 3: turn off the Shelly plug ─────────────────────────────
-        if let Some(ref plug_mac) = self.shelly_mac {
-            let plug = ShellyPlugStoppable::new(plug_mac.clone(), self.scanner.clone(), self.client.clone());
-            if let Err(e) = plug.stop().await {
-                eprintln!("[CompositeStoppable] Failed to turn off Shelly plug for '{}': {}", self.target_name, e);
-            }
+        let plug = ShellyPlugStoppable::new(plug_mac.clone(), scanner.clone(), client.clone());
+        if let Err(e) = plug.stop().await {
+            eprintln!("[stop] Failed to turn off Shelly plug for '{}': {}", target_name, e);
         }
-
-        eprintln!("[CompositeStoppable] Stop sequence complete for '{}'", self.target_name);
-        Ok(())
     }
+
+    eprintln!("[stop] Stop sequence complete for '{}'", target_name);
 }
 
 // ── HTTP handler ─────────────────────────────────────────────────────────────
@@ -291,11 +268,9 @@ impl Stoppable for CompositeStoppable {
 /// **fire-and-forget**: the endpoint spawns a background task and immediately
 /// returns **204 No Content**.
 ///
-/// Depending on configuration the background task will:
-///   - Send a graceful shutdown via SSH or REST API (if configured)
-///   - Wait for the device to disappear from the network (if a Shelly plug is
-///     also configured)
-///   - Turn off the Shelly smart plug
+/// The handler pattern-matches the target configuration to determine:
+///   - **Graceful method** — SSH (highest priority), REST API, or none
+///   - **Plug off** — whether to turn off the Shelly smart plug afterward
 pub async fn stop_target_handler(
     target_name: web::Path<String>,
     relay_state: web::Data<RelayState>,
@@ -324,38 +299,44 @@ pub async fn stop_target_handler(
             shelly_power_mac,
             shutdown_ssh,
             shutdown_api_path,
+            shutdown_plug_off,
             ..
         } => {
-            let has_shelly = shelly_power_mac.is_some();
-            let has_ssh = shutdown_ssh.is_some();
-            let has_rest = shutdown_api_path.is_some();
+            // ── Determine graceful method (SSH takes precedence) ──────
+            let graceful = match (shutdown_ssh, shutdown_api_path) {
+                (Some(ssh), _)    => GracefulMethod::Ssh(ssh.clone()),
+                (None, Some(api)) => GracefulMethod::RestApi(api.clone()),
+                (None, None)      => GracefulMethod::None,
+            };
 
-            if !has_shelly && !has_ssh && !has_rest {
+            // ── Determine plug-off MAC ───────────────────────────────
+            let plug_off_mac = match (shutdown_plug_off, shelly_power_mac) {
+                (true, Some(plug)) => Some(plug.clone()),
+                _                  => None,
+            };
+
+            // ── Reject if nothing is configured ──────────────────────
+            if matches!(graceful, GracefulMethod::None) && plug_off_mac.is_none() {
                 return HttpResponse::BadRequest().json(ErrorResponse {
                     status: "error",
                     target: target_name,
                     message: "Target has no stop methods configured \
-                              (need shelly_power_mac, shutdown_ssh, or shutdown_api_path)"
+                              (need shutdown_ssh, shutdown_api_path, or \
+                              shelly_power_mac + shutdown_plug_off)"
                         .to_string(),
                 });
             }
 
-            // Spawn fire-and-forget background task
-            let stopper = CompositeStoppable::new(
-                target_name.clone(),
-                mac.clone(),
-                *port,
-                shelly_power_mac.clone(),
-                shutdown_ssh.clone(),
-                shutdown_api_path.clone(),
-                monitor.scanner().clone(),
-                monitor.client().clone(),
-            );
+            // ── Spawn fire-and-forget background task ────────────────
+            let mac = mac.clone();
+            let port = *port;
+            let scanner = monitor.scanner().clone();
+            let client = monitor.client().clone();
 
             tokio::spawn(async move {
-                if let Err(e) = stopper.stop().await {
-                    eprintln!("[stop] Background stop failed for '{}': {}", target_name, e);
-                }
+                run_stop_sequence(
+                    target_name, mac, port, graceful, plug_off_mac, scanner, client,
+                ).await;
             });
 
             HttpResponse::NoContent().finish() // 204

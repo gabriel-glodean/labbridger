@@ -61,12 +61,23 @@ relay:
     #   port: 22
     #   probe_method: "ping"
     #   shelly_power_mac: "11:22:33:44:55:66"
+    #   shutdown_plug_off: true               # turn off plug after SSH shutdown
     #   shutdown_ssh:
     #     username: "root"
     #     # os: linux                          # target OS (default: linux)
     #     # port: 22                          # SSH port (default: 22)
     #     # key_file: "/root/.ssh/id_ed25519" # omit to use system default key
     #     # command: "sudo poweroff"           # shutdown command (default for linux)
+
+    # MAC-based with SSH shutdown only (no plug off):
+    # server:
+    #   mac: "cc:dd:ee:ff:11:22"
+    #   port: 22
+    #   probe_method: "ping"
+    #   shelly_power_mac: "11:22:33:44:55:66"   # used for /start only
+    #   # shutdown_plug_off: false               # default — plug stays on after SSH stop
+    #   shutdown_ssh:
+    #     username: "root"
 
     # MAC-based with SSH shutdown for a Windows machine (password auth):
     # Requires `sshpass` installed on the server: apt install sshpass
@@ -88,6 +99,15 @@ relay:
     #   port: 8080
     #   shelly_power_mac: "11:22:33:44:55:66"
     #   shutdown_api_path: "/api/shutdown"     # POST to this path to shut down
+    #   shutdown_plug_off: true                # turn off plug after API shutdown
+
+    # Brute Shelly stop (just cut power, no graceful shutdown):
+    # dumb_device:
+    #   mac: "cc:dd:ee:ff:11:22"
+    #   port: 22
+    #   probe_method: "ping"
+    #   shelly_power_mac: "11:22:33:44:55:66"
+    #   shutdown_plug_off: true                # only stop method — just turn off the plug
 
     # Static URL (always on, can't be remotely started):
     # static_service: "http://192.168.1.50:8000"
