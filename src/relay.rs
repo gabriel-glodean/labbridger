@@ -69,7 +69,8 @@ async fn proxy(
     // Resolve target base URL
     let base_url = match state.targets.get(target_name) {
         Some(RelayTarget::Static(url)) => url.trim_end_matches('/').to_owned(),
-        Some(RelayTarget::Mac { mac, port }) => {
+        Some(RelayTarget::StaticManaged { url, .. }) => url.trim_end_matches('/').to_owned(),
+        Some(RelayTarget::Mac { mac, port, .. }) => {
             match state.scanner.get_ip_by_mac(mac) {
                 Some(ip) => format!("http://{}:{}", ip, port),
                 None => {

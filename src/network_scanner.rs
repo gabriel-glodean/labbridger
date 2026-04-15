@@ -218,9 +218,14 @@ impl NetworkScanner {
                     .map(|_| *ip)
             })
     }
-
+    
     /// Returns the most recently detected (ip, mac) pair across all scans.
     pub fn get_latest(&self) -> Option<LatestDevice> {
         self.latest.read().unwrap().clone()
+    }
+
+    /// Returns the network base address (e.g., "192.168.1") used for scanning.
+    pub fn network_base(&self) -> &str {
+        &self.network_base
     }
 }

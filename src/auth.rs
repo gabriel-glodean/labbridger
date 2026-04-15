@@ -68,6 +68,7 @@ impl AuthState {
             .unwrap_or(false)
     }
 
+
     /// Return `true` when auth is effectively disabled (no users configured).
     pub fn is_disabled(&self) -> bool {
         self.users.is_empty()

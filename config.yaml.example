@@ -28,9 +28,78 @@ plugs:
 # Relay targets: each key becomes a URL segment under /relay/<name>/...
 relay:
   targets:
-    # MAC-based (IP resolved dynamically from the network scanner):
+    # MAC-based with Shelly power control (IP resolved dynamically):
     ollama:
-      mac: "aa:bb:cc:dd:ee:ff"
-      port: 11434
-    # Static URL alternative:
-    # other: "http://192.168.1.50:8000"
+      mac: "aa:bb:cc:dd:ee:ff"              # MAC of the target device
+      port: 11434                             # Service port
+      probe_path: "/api/tags"                 # Health check endpoint (optional, default: "/")
+      shelly_power_mac: "11:22:33:44:55:66"  # MAC of Shelly plug controlling power (optional)
+
+    # MAC-based with Wake-on-LAN support:
+    # wol_device:
+    #   mac: "aa:bb:cc:dd:ee:ff"
+    #   port: 8080
+    #   wol_enabled: true                     # Enable Wake-on-LAN for this device
+    #   probe_path: "/"                       # Health check endpoint (optional)
+
+    # MAC-based without power control:
+    # other_device:
+    #   mac: "cc:dd:ee:ff:11:22"
+    #   port: 8080
+    #   probe_path: "/"
+
+    # MAC-based with ping probe (useful for devices without HTTP service):
+    # ssh_device:
+    #   mac: "cc:dd:ee:ff:11:22"
+    #   port: 22
+    #   probe_method: "ping"                  # Use ICMP ping instead of HTTP
+
+    # MAC-based with Shelly + SSH shutdown (POST /stop/{name}):
+    # Composite stop: SSH graceful shutdown → wait offline → Shelly plug off
+    # tv_box:
+    #   mac: "cc:dd:ee:ff:11:22"
+    #   port: 22
+    #   probe_method: "ping"
+    #   shelly_power_mac: "11:22:33:44:55:66"
+    #   shutdown_ssh:
+    #     username: "root"
+    #     # os: linux                          # target OS (default: linux)
+    #     # port: 22                          # SSH port (default: 22)
+    #     # key_file: "/root/.ssh/id_ed25519" # omit to use system default key
+    #     # command: "sudo poweroff"           # shutdown command (default for linux)
+
+    # MAC-based with SSH shutdown for a Windows machine (password auth):
+    # Requires `sshpass` installed on the server: apt install sshpass
+    # win_server:
+    #   mac: "cc:dd:ee:ff:33:44"
+    #   port: 3389
+    #   probe_method: "ping"
+    #   shutdown_ssh:
+    #     username: "Administrator"
+    #     password: "s3cret"                   # password auth (uses sshpass)
+    #     os: windows                          # uses "shutdown /s /t 0" by default
+    #     # port: 22
+    #     # command: "shutdown /s /t 0"        # override if needed
+
+    # MAC-based with Shelly + REST API shutdown (POST /stop/{name}):
+    # Composite stop: POST shutdown API → wait offline → Shelly plug off
+    # api_device:
+    #   mac: "cc:dd:ee:ff:11:22"
+    #   port: 8080
+    #   shelly_power_mac: "11:22:33:44:55:66"
+    #   shutdown_api_path: "/api/shutdown"     # POST to this path to shut down
+
+    # Static URL (always on, can't be remotely started):
+    # static_service: "http://192.168.1.50:8000"
+
+    # Static URL with probe path:
+    # managed_service:
+    #   url: "http://192.168.1.60:9000"
+    #   probe_path: "/health"
+
+    # Static URL with ping probe:
+    # ping_monitored:
+    #   url: "http://192.168.1.70:22"
+    #   probe_method: "ping"
+
+
